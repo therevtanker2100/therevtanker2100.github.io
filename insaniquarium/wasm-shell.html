@@ -70,7 +70,10 @@
       top: calc(12px + env(safe-area-inset-top, 0px));
       right: calc(12px + env(safe-area-inset-right, 0px));
       display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
       gap: 8px;
+      max-width: calc(100vw - 24px);
       z-index: 5;
     }
     .tool-button, .file-label {
@@ -81,22 +84,19 @@
       padding: 8px 10px;
       font: inherit;
       font-size: 13px;
+      line-height: 1.1;
       cursor: pointer;
+      white-space: nowrap;
     }
     .tool-button:hover, .file-label:hover {
       background: rgba(24, 35, 48, 0.82);
     }
-    #soft-keyboard-button {
-      position: fixed;
-      right: calc(12px + env(safe-area-inset-right, 0px));
-      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-      display: none;
-      z-index: 6;
+    .tool-button.active, .file-label.active {
+      background: rgba(24, 35, 48, 0.9);
+      border-color: rgba(202, 241, 255, 0.72);
     }
-	    @media (hover: none) and (pointer: coarse), (max-width: 700px), (max-height: 520px) {
-	      #soft-keyboard-button.active {
-	        display: block;
-	      }
+    #soft-keyboard-button {
+      min-width: 44px;
     }
     .file-label input {
       display: none;
@@ -107,14 +107,21 @@
         right: calc(8px + env(safe-area-inset-right, 0px));
         flex-direction: column;
         align-items: flex-end;
-        gap: 6px;
+        gap: 5px;
+        max-width: min(30vw, 112px);
       }
       .tool-button, .file-label {
-        max-width: min(36vw, 120px);
-        padding: 6px 8px;
+        min-width: 0;
+        max-width: min(30vw, 112px);
+        padding: 5px 7px;
         font-size: 12px;
+        line-height: 1.05;
+        overflow-wrap: anywhere;
         text-align: right;
         white-space: normal;
+      }
+      #soft-keyboard-button {
+        min-width: 42px;
       }
     }
     @media (max-height: 360px) {
@@ -163,6 +170,22 @@
       line-height: 1.45;
       font-size: 14px;
     }
+    #assetless-legal {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      margin: 0;
+      color: rgba(231, 238, 248, 0.82);
+      font-size: 12px;
+      line-height: 1.35;
+      text-align: center;
+    }
+    #assetless-legal a {
+      color: #ffffff;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
   </style>
 </head>
 <body>
@@ -172,17 +195,17 @@
   <input id="winfish-soft-keyboard" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done" aria-hidden="true">
 
   <div id="wasm-tools">
+    <button class="tool-button" id="soft-keyboard-button" type="button" aria-label="Show keyboard">ABC</button>
     <label class="file-label" id="asset-upload-tool" hidden>
       Assets
       <input id="asset-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
     </label>
-    <label class="file-label">
+    <label class="file-label" id="userdata-import-tool" hidden>
       Import Data
       <input id="userdata-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
     </label>
-    <button class="tool-button" id="export-userdata" type="button">Export Data</button>
+    <button class="tool-button" id="export-userdata" type="button" hidden>Export Data</button>
   </div>
-  <button class="tool-button" id="soft-keyboard-button" type="button" aria-label="Show keyboard">ABC</button>
 
   <div id="asset-panel">
     <div id="asset-panel-inner">
@@ -193,6 +216,9 @@
         <input id="asset-file-blocking" type="file" accept=".zip,application/zip,application/x-zip-compressed">
       </label>
     </div>
+    <p id="assetless-legal" hidden>
+      We are in no way, shape, or form affiliated with EA/PopCap or their associates. You must use your own assets. The game can be bought legally <a href="https://store.steampowered.com/app/3320/Insaniquarium_Deluxe/" target="_blank" rel="noopener noreferrer">here</a>.
+    </p>
   </div>
 
   <div id="status">Loading Insaniquarium...</div>
@@ -251,6 +277,60 @@
     function showAssetPanel(show) {
       document.getElementById("asset-panel").style.display = show ? "flex" : "none";
       document.getElementById("asset-panel-inner").classList.remove("drag-active");
+      setAssetlessLegalVisible(show && !WINFISH_WASM_EMBEDDED_ASSETS);
+    }
+
+    function setAssetlessLegalVisible(visible) {
+      var legal = document.getElementById("assetless-legal");
+      if (legal) legal.hidden = !visible;
+    }
+
+    function setUserDataToolsVisible(visible) {
+      ["userdata-import-tool", "export-userdata"].forEach(function(id) {
+        var element = document.getElementById(id);
+        if (element) element.hidden = !visible;
+      });
+    }
+
+    function updateUserDataToolsVisibility() {
+      if (WINFISH_WASM_EMBEDDED_ASSETS) {
+        setUserDataToolsVisible(true);
+        return;
+      }
+      setUserDataToolsVisible(typeof FS !== "undefined" && hasRequiredAssets());
+    }
+
+    function fullscreenElement() {
+      return document.fullscreenElement || document.webkitFullscreenElement || null;
+    }
+
+    function requestGameFullscreen() {
+      var target = document.getElementById("canvas-container") || document.documentElement;
+      requestLandscapeOrientation();
+      if (target.requestFullscreen) {
+        return target.requestFullscreen().then(function() {
+          requestLandscapeOrientation();
+          return true;
+        });
+      }
+      if (target.webkitRequestFullscreen) {
+        var result = target.webkitRequestFullscreen();
+        requestLandscapeOrientation();
+        return Promise.resolve(result).then(function() { return true; });
+      }
+      return Promise.resolve(false);
+    }
+
+    function exitGameFullscreen() {
+      if (document.exitFullscreen) return document.exitFullscreen();
+      if (document.webkitExitFullscreen) return Promise.resolve(document.webkitExitFullscreen());
+      return Promise.resolve();
+    }
+
+    function setGameFullscreen(fullscreen) {
+      if (fullscreenElement() && fullscreen) return Promise.resolve(true);
+      if (!fullscreenElement() && !fullscreen) return Promise.resolve(true);
+      return fullscreen ? requestGameFullscreen() : exitGameFullscreen();
     }
 
     function mkdirTree(path) {
@@ -381,6 +461,7 @@
       if (count === 0 || !hasRequiredAssets())
         throw new Error("The zip did not contain all required asset folders.");
       await syncPersistentData(false);
+      setUserDataToolsVisible(true);
       showAssetPanel(false);
       statusText("");
       if (winfishAssetRunDependency) {
@@ -405,6 +486,7 @@
         removeTree("/" + dir);
       });
       await syncPersistentData(false);
+      setUserDataToolsVisible(false);
       statusText("Assets deleted. Reloading...");
       setTimeout(function() { location.reload(); }, 0);
     }
@@ -593,24 +675,25 @@
         var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
         if (file) importAssets(file).catch(reportAssetImportError);
       });
-	    }
+    }
 
-	    wireFileInput("asset-file", importAssets);
-	    wireFileInput("asset-file-blocking", importAssets);
-	    wireFileInput("userdata-file", importUserData);
-	    wireAssetDropZone();
-	    wireLandscapeOrientationLock();
-	    document.getElementById("export-userdata").addEventListener("click", function() {
-	      exportUserData().catch(function(err) {
-	        console.error(err);
-	        statusText(err.message || String(err));
-	      });
-	    });
+    wireFileInput("asset-file", importAssets);
+    wireFileInput("asset-file-blocking", importAssets);
+    wireFileInput("userdata-file", importUserData);
+    wireAssetDropZone();
+    wireLandscapeOrientationLock();
+    document.getElementById("export-userdata").addEventListener("click", function() {
+      exportUserData().catch(function(err) {
+        console.error(err);
+        statusText(err.message || String(err));
+      });
+    });
 
-	    var Module = {
-	      canvas: document.getElementById("canvas"),
-	      wasmRequestLandscapeOrientation: requestLandscapeOrientation,
-	      preRun: [function() {
+    var Module = {
+      canvas: document.getElementById("canvas"),
+      wasmRequestLandscapeOrientation: requestLandscapeOrientation,
+      wasmSetGameFullscreen: setGameFullscreen,
+      preRun: [function() {
         addRunDependency("winfish-saves");
         mkdirTree(WINFISH_SAVE_ROOT);
         FS.mount(IDBFS, {}, WINFISH_SAVE_ROOT);
@@ -627,14 +710,21 @@
 
         syncPersistentData(true).then(function() {
           removeRunDependency("winfish-saves");
+          if (WINFISH_WASM_EMBEDDED_ASSETS) {
+            setUserDataToolsVisible(true);
+          }
           if (winfishAssetRunDependency) {
             if (hasRequiredAssets()) {
+              setUserDataToolsVisible(true);
               winfishAssetRunDependency = false;
               removeRunDependency("winfish-assets");
             } else {
+              setUserDataToolsVisible(false);
               statusText("Upload Insaniquarium assets to start.");
               showAssetPanel(true);
             }
+          } else {
+            updateUserDataToolsVisibility();
           }
         });
       }],
