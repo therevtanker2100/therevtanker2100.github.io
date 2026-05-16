@@ -126,6 +126,7 @@
     var WINFISH_REQUIRED_ASSET_DIRS = ["data", "fishsongs", "images", "music", "properties", "sounds"];
     var WINFISH_SAVE_ROOT = "/libsdl/PopCap/Insaniquarium/saves";
     var WINFISH_USERDATA_ROOT = WINFISH_SAVE_ROOT + "/userdata";
+    var WINFISH_MUSIC_FALLBACK_ZIP = "winfish-wasm-music.zip";
     var winfishAssetRunDependency = false;
 
     function statusText(text) {
@@ -265,6 +266,7 @@
       });
       if (count === 0 || !hasRequiredAssets())
         throw new Error("The zip did not contain all required asset folders.");
+      await loadBundledMusicFallbacks();
       await syncPersistentData(false);
       showAssetPanel(false);
       statusText("");
@@ -274,6 +276,35 @@
       } else {
         location.reload();
       }
+    }
+
+    function mapBundledMusicFallbackPath(name) {
+      var parts = normalizeZipName(name).split("/").filter(Boolean);
+      if (parts.length < 2 || parts[0].toLowerCase() !== "music") return "";
+      var fileName = parts[parts.length - 1].toLowerCase();
+      if (fileName.indexOf(".order") < 0) return "";
+      if (!fileName.endsWith(".ogg") && !fileName.endsWith(".mp3") && !fileName.endsWith(".wav")) return "";
+      return "/music/" + parts.slice(1).join("/");
+    }
+
+    async function loadBundledMusicFallbacks() {
+      if (WINFISH_WASM_EMBEDDED_ASSETS) return;
+      var response;
+      try {
+        response = await fetch(WINFISH_MUSIC_FALLBACK_ZIP, { cache: "no-store" });
+      } catch (e) {
+        console.warn("Wasm music fallback zip is not available:", e);
+        return;
+      }
+      if (!response.ok) return;
+      var blob = await response.blob();
+      var entries = await readZip(new File([blob], WINFISH_MUSIC_FALLBACK_ZIP));
+      entries.forEach(function(entry) {
+        var mapped = mapBundledMusicFallbackPath(entry.name);
+        if (!mapped) return;
+        mkdirTree(mapped.slice(0, mapped.lastIndexOf("/")));
+        FS.writeFile(mapped, entry.data);
+      });
     }
 
     function mapUserDataPath(name) {
@@ -470,16 +501,20 @@
         }
 
         syncPersistentData(true).then(function() {
-          removeRunDependency("winfish-saves");
-          if (winfishAssetRunDependency) {
-            if (hasRequiredAssets()) {
-              winfishAssetRunDependency = false;
-              removeRunDependency("winfish-assets");
-            } else {
-              statusText("Upload Insaniquarium assets to start.");
-              showAssetPanel(true);
+          loadBundledMusicFallbacks().then(function() {
+            return syncPersistentData(false);
+          }).then(function() {
+            removeRunDependency("winfish-saves");
+            if (winfishAssetRunDependency) {
+              if (hasRequiredAssets()) {
+                winfishAssetRunDependency = false;
+                removeRunDependency("winfish-assets");
+              } else {
+                statusText("Upload Insaniquarium assets to start.");
+                showAssetPanel(true);
+              }
             }
-          }
+          });
         });
       }],
       setStatus: statusText,
