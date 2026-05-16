@@ -9,7 +9,7 @@
       margin: 0;
       width: 100%;
       height: 100%;
-      background: #05070a;
+      background: #0564bd;
       color: #e7eef8;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       overflow: hidden;
@@ -19,7 +19,7 @@
       height: 100vh;
       display: grid;
       place-items: center;
-      background: #05070a;
+      background: #0564bd;
     }
     canvas {
       width: min(100vw, calc(100vh * 4 / 3));
@@ -61,6 +61,9 @@
     .file-label input {
       display: none;
     }
+    [hidden] {
+      display: none !important;
+    }
     #asset-panel {
       position: fixed;
       inset: 0;
@@ -68,7 +71,7 @@
       align-items: center;
       justify-content: center;
       z-index: 10;
-      background: rgba(5, 7, 10, 0.86);
+      background: rgba(0, 75, 150, 0.86);
     }
     #asset-panel-inner {
       width: min(520px, calc(100vw - 32px));
@@ -77,6 +80,10 @@
       background: rgba(12, 19, 28, 0.96);
       padding: 22px;
       box-shadow: 0 20px 64px rgba(0, 0, 0, 0.45);
+    }
+    #asset-panel-inner.drag-active {
+      border-color: rgba(202, 241, 255, 0.95);
+      background: rgba(0, 85, 170, 0.96);
     }
     #asset-panel h1 {
       margin: 0 0 10px;
@@ -98,7 +105,7 @@
   </div>
 
   <div id="wasm-tools">
-    <label class="file-label">
+    <label class="file-label" id="asset-upload-tool" hidden>
       Assets
       <input id="asset-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
     </label>
@@ -112,7 +119,7 @@
   <div id="asset-panel">
     <div id="asset-panel-inner">
       <h1>Assets Required</h1>
-      <p>Choose a zip containing the Insaniquarium asset folders: data, fishsongs, images, music, properties, and sounds.</p>
+      <p>Drop or choose a zip containing the Insaniquarium asset folders: data, fishsongs, images, music, properties, and sounds.</p>
       <label class="file-label">
         Choose Assets Zip
         <input id="asset-file-blocking" type="file" accept=".zip,application/zip,application/x-zip-compressed">
@@ -136,6 +143,7 @@
 
     function showAssetPanel(show) {
       document.getElementById("asset-panel").style.display = show ? "flex" : "none";
+      document.getElementById("asset-panel-inner").classList.remove("drag-active");
     }
 
     function mkdirTree(path) {
@@ -274,6 +282,12 @@
       } else {
         location.reload();
       }
+    }
+
+    function reportAssetImportError(err) {
+      console.error(err);
+      statusText(err.message || String(err));
+      if (winfishAssetRunDependency) showAssetPanel(true);
     }
 
     async function clearUploadedAssetsAndReload() {
@@ -446,17 +460,38 @@
         var file = event.target.files && event.target.files[0];
         event.target.value = "";
         if (!file) return;
-        handler(file).catch(function(err) {
-          console.error(err);
-          statusText(err.message || String(err));
-          if (winfishAssetRunDependency) showAssetPanel(true);
+        handler(file).catch(reportAssetImportError);
+      });
+    }
+
+    function wireAssetDropZone() {
+      var panel = document.getElementById("asset-panel");
+      var inner = document.getElementById("asset-panel-inner");
+      ["dragenter", "dragover"].forEach(function(type) {
+        panel.addEventListener(type, function(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+          inner.classList.add("drag-active");
         });
+      });
+      ["dragleave", "drop"].forEach(function(type) {
+        panel.addEventListener(type, function(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          inner.classList.remove("drag-active");
+        });
+      });
+      panel.addEventListener("drop", function(event) {
+        var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        if (file) importAssets(file).catch(reportAssetImportError);
       });
     }
 
     wireFileInput("asset-file", importAssets);
     wireFileInput("asset-file-blocking", importAssets);
     wireFileInput("userdata-file", importUserData);
+    wireAssetDropZone();
     document.getElementById("export-userdata").addEventListener("click", function() {
       exportUserData().catch(function(err) {
         console.error(err);
