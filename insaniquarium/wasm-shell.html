@@ -67,8 +67,8 @@
     }
     #wasm-tools {
       position: fixed;
-      top: 12px;
-      right: 12px;
+      top: calc(12px + env(safe-area-inset-top, 0px));
+      right: calc(12px + env(safe-area-inset-right, 0px));
       display: flex;
       gap: 8px;
       z-index: 5;
@@ -88,18 +88,44 @@
     }
     #soft-keyboard-button {
       position: fixed;
-      right: 12px;
-      bottom: 12px;
+      right: calc(12px + env(safe-area-inset-right, 0px));
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
       display: none;
       z-index: 6;
     }
-    @media (hover: none) and (pointer: coarse) {
-      #soft-keyboard-button.active {
-        display: block;
-      }
+	    @media (hover: none) and (pointer: coarse), (max-width: 700px), (max-height: 520px) {
+	      #soft-keyboard-button.active {
+	        display: block;
+	      }
     }
     .file-label input {
       display: none;
+    }
+    @media (max-width: 700px), (max-height: 520px), (hover: none) and (pointer: coarse) {
+      #wasm-tools {
+        top: calc(76px + env(safe-area-inset-top, 0px));
+        right: calc(8px + env(safe-area-inset-right, 0px));
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+      }
+      .tool-button, .file-label {
+        max-width: min(36vw, 120px);
+        padding: 6px 8px;
+        font-size: 12px;
+        text-align: right;
+        white-space: normal;
+      }
+    }
+    @media (max-height: 360px) {
+      #wasm-tools {
+        top: calc(54px + env(safe-area-inset-top, 0px));
+        gap: 4px;
+      }
+      .tool-button, .file-label {
+        padding: 5px 7px;
+        font-size: 11px;
+      }
     }
     [hidden] {
       display: none !important;
@@ -176,6 +202,45 @@
     var WINFISH_SAVE_ROOT = "/libsdl/PopCap/Insaniquarium/saves";
     var WINFISH_USERDATA_ROOT = WINFISH_SAVE_ROOT + "/userdata";
     var winfishAssetRunDependency = false;
+    var winfishLandscapeLockInFlight = false;
+
+    function requestLandscapeOrientation() {
+      if (typeof screen === "undefined" || !screen.orientation || typeof screen.orientation.lock !== "function") {
+        return Promise.resolve(false);
+      }
+      if (winfishLandscapeLockInFlight) {
+        return Promise.resolve(false);
+      }
+      winfishLandscapeLockInFlight = true;
+      try {
+        return screen.orientation.lock("landscape").then(function() {
+          return true;
+        }).catch(function() {
+          return false;
+        }).then(function(result) {
+          winfishLandscapeLockInFlight = false;
+          return result;
+        });
+      } catch (err) {
+        winfishLandscapeLockInFlight = false;
+        return Promise.resolve(false);
+      }
+    }
+
+    function wireLandscapeOrientationLock() {
+      requestLandscapeOrientation();
+      ["pointerdown", "touchend", "keydown"].forEach(function(type) {
+        window.addEventListener(type, function() {
+          requestLandscapeOrientation();
+        }, { passive: true });
+      });
+      window.addEventListener("orientationchange", function() {
+        setTimeout(requestLandscapeOrientation, 80);
+      });
+      window.addEventListener("resize", function() {
+        requestLandscapeOrientation();
+      });
+    }
 
     function statusText(text) {
       var status = document.getElementById("status");
@@ -528,22 +593,24 @@
         var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
         if (file) importAssets(file).catch(reportAssetImportError);
       });
-    }
+	    }
 
-    wireFileInput("asset-file", importAssets);
-    wireFileInput("asset-file-blocking", importAssets);
-    wireFileInput("userdata-file", importUserData);
-    wireAssetDropZone();
-    document.getElementById("export-userdata").addEventListener("click", function() {
-      exportUserData().catch(function(err) {
-        console.error(err);
-        statusText(err.message || String(err));
-      });
-    });
+	    wireFileInput("asset-file", importAssets);
+	    wireFileInput("asset-file-blocking", importAssets);
+	    wireFileInput("userdata-file", importUserData);
+	    wireAssetDropZone();
+	    wireLandscapeOrientationLock();
+	    document.getElementById("export-userdata").addEventListener("click", function() {
+	      exportUserData().catch(function(err) {
+	        console.error(err);
+	        statusText(err.message || String(err));
+	      });
+	    });
 
-    var Module = {
-      canvas: document.getElementById("canvas"),
-      preRun: [function() {
+	    var Module = {
+	      canvas: document.getElementById("canvas"),
+	      wasmRequestLandscapeOrientation: requestLandscapeOrientation,
+	      preRun: [function() {
         addRunDependency("winfish-saves");
         mkdirTree(WINFISH_SAVE_ROOT);
         FS.mount(IDBFS, {}, WINFISH_SAVE_ROOT);
