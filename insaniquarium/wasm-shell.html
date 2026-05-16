@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Insaniquarium</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #05070a;
+      color: #e7eef8;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #05070a;
+    }
+    canvas {
+      width: min(100vw, calc(100vh * 4 / 3));
+      height: min(100vh, calc(100vw * 3 / 4));
+      image-rendering: auto;
+      outline: none;
+    }
+    #status {
+      position: fixed;
+      left: 16px;
+      bottom: 14px;
+      max-width: calc(100vw - 32px);
+      font-size: 13px;
+      color: rgba(231, 238, 248, 0.78);
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+    }
+    #wasm-tools {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 8px;
+      z-index: 5;
+    }
+    .tool-button, .file-label {
+      border: 1px solid rgba(231, 238, 248, 0.32);
+      background: rgba(5, 7, 10, 0.72);
+      color: #e7eef8;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .tool-button:hover, .file-label:hover {
+      background: rgba(24, 35, 48, 0.82);
+    }
+    .file-label input {
+      display: none;
+    }
+    #asset-panel {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      background: rgba(5, 7, 10, 0.86);
+    }
+    #asset-panel-inner {
+      width: min(520px, calc(100vw - 32px));
+      border: 1px solid rgba(231, 238, 248, 0.28);
+      border-radius: 8px;
+      background: rgba(12, 19, 28, 0.96);
+      padding: 22px;
+      box-shadow: 0 20px 64px rgba(0, 0, 0, 0.45);
+    }
+    #asset-panel h1 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    #asset-panel p {
+      margin: 0 0 16px;
+      color: rgba(231, 238, 248, 0.78);
+      line-height: 1.45;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container">
+    <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  </div>
+
+  <div id="wasm-tools">
+    <label class="file-label">
+      Assets
+      <input id="asset-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
+    </label>
+    <label class="file-label">
+      Import Data
+      <input id="userdata-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
+    </label>
+    <button class="tool-button" id="export-userdata" type="button">Export Data</button>
+  </div>
+
+  <div id="asset-panel">
+    <div id="asset-panel-inner">
+      <h1>Assets Required</h1>
+      <p>Choose a zip containing the Insaniquarium asset folders: data, fishsongs, images, music, properties, and sounds.</p>
+      <label class="file-label">
+        Choose Assets Zip
+        <input id="asset-file-blocking" type="file" accept=".zip,application/zip,application/x-zip-compressed">
+      </label>
+    </div>
+  </div>
+
+  <div id="status">Loading Insaniquarium...</div>
+  <script>
+    var WINFISH_WASM_EMBEDDED_ASSETS = false;
+    var WINFISH_REQUIRED_ASSET_DIRS = ["data", "fishsongs", "images", "music", "properties", "sounds"];
+    var WINFISH_SAVE_ROOT = "/libsdl/PopCap/Insaniquarium/saves";
+    var WINFISH_USERDATA_ROOT = WINFISH_SAVE_ROOT + "/userdata";
+    var winfishAssetRunDependency = false;
+
+    function statusText(text) {
+      var status = document.getElementById("status");
+      status.textContent = text || "";
+      status.style.display = text ? "block" : "none";
+    }
+
+    function showAssetPanel(show) {
+      document.getElementById("asset-panel").style.display = show ? "flex" : "none";
+    }
+
+    function mkdirTree(path) {
+      var parts = path.split("/").filter(Boolean);
+      var cur = "";
+      for (var i = 0; i < parts.length; ++i) {
+        cur += "/" + parts[i];
+        try { FS.mkdir(cur); } catch (e) {}
+      }
+    }
+
+    function pathExists(path) {
+      try { return FS.analyzePath(path).exists; } catch (e) { return false; }
+    }
+
+    function removeTree(path) {
+      if (!pathExists(path)) return;
+      var entries = FS.readdir(path);
+      for (var i = 0; i < entries.length; ++i) {
+        var name = entries[i];
+        if (name === "." || name === "..") continue;
+        var child = path + "/" + name;
+        if (FS.isDir(FS.stat(child).mode)) removeTree(child);
+        else FS.unlink(child);
+      }
+    }
+
+    function listFiles(path, out, prefix) {
+      if (!pathExists(path)) return;
+      var entries = FS.readdir(path);
+      for (var i = 0; i < entries.length; ++i) {
+        var name = entries[i];
+        if (name === "." || name === "..") continue;
+        var child = path + "/" + name;
+        var rel = prefix ? prefix + "/" + name : name;
+        if (FS.isDir(FS.stat(child).mode)) listFiles(child, out, rel);
+        else out.push({ path: child, name: rel });
+      }
+    }
+
+    function hasRequiredAssets() {
+      for (var i = 0; i < WINFISH_REQUIRED_ASSET_DIRS.length; ++i) {
+        var dir = "/" + WINFISH_REQUIRED_ASSET_DIRS[i];
+        if (!pathExists(dir)) return false;
+        var entries = FS.readdir(dir).filter(function(name) { return name !== "." && name !== ".."; });
+        if (entries.length === 0) return false;
+      }
+      return true;
+    }
+
+    function normalizeZipName(name) {
+      return name.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+    }
+
+    function little32(view, offset) {
+      return view.getUint32(offset, true);
+    }
+
+    async function inflateRaw(bytes) {
+      if (typeof DecompressionStream === "undefined")
+        throw new Error("This browser cannot inflate zip files.");
+      var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    async function readZip(file) {
+      var bytes = new Uint8Array(await file.arrayBuffer());
+      var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      var entries = [];
+      var offset = 0;
+      while (offset + 30 <= bytes.length) {
+        var sig = little32(view, offset);
+        if (sig !== 0x04034b50) break;
+        var flags = view.getUint16(offset + 6, true);
+        var method = view.getUint16(offset + 8, true);
+        var compressedSize = little32(view, offset + 18);
+        var nameLen = view.getUint16(offset + 26, true);
+        var extraLen = view.getUint16(offset + 28, true);
+        var nameStart = offset + 30;
+        var dataStart = nameStart + nameLen + extraLen;
+        if (flags & 0x08)
+          throw new Error("Zip data descriptors are not supported.");
+        if (dataStart + compressedSize > bytes.length)
+          throw new Error("Zip entry is truncated.");
+        var rawName = new TextDecoder().decode(bytes.slice(nameStart, nameStart + nameLen));
+        var name = normalizeZipName(rawName);
+        var compressed = bytes.slice(dataStart, dataStart + compressedSize);
+        var data;
+        if (method === 0) data = compressed;
+        else if (method === 8) data = await inflateRaw(compressed);
+        else throw new Error("Unsupported zip compression method " + method + " for " + name);
+        if (name && !name.endsWith("/")) entries.push({ name: name, data: data });
+        offset = dataStart + compressedSize;
+      }
+      return entries;
+    }
+
+    function mapAssetPath(name) {
+      var parts = normalizeZipName(name).split("/").filter(Boolean);
+      for (var i = 0; i < parts.length; ++i) {
+        var lower = parts[i].toLowerCase();
+        for (var j = 0; j < WINFISH_REQUIRED_ASSET_DIRS.length; ++j) {
+          if (lower === WINFISH_REQUIRED_ASSET_DIRS[j]) {
+            var rest = parts.slice(i + 1);
+            if (rest.length === 0) return "";
+            return "/" + WINFISH_REQUIRED_ASSET_DIRS[j] + "/" + rest.join("/");
+          }
+        }
+      }
+      return "";
+    }
+
+    async function importAssets(file) {
+      statusText("Importing assets...");
+      var entries = await readZip(file);
+      WINFISH_REQUIRED_ASSET_DIRS.forEach(function(dir) {
+        mkdirTree("/" + dir);
+        removeTree("/" + dir);
+      });
+      var count = 0;
+      entries.forEach(function(entry) {
+        var mapped = mapAssetPath(entry.name);
+        if (!mapped) return;
+        mkdirTree(mapped.slice(0, mapped.lastIndexOf("/")));
+        FS.writeFile(mapped, entry.data);
+        count++;
+      });
+      if (count === 0 || !hasRequiredAssets())
+        throw new Error("The zip did not contain all required asset folders.");
+      await syncPersistentData(false);
+      showAssetPanel(false);
+      statusText("");
+      if (winfishAssetRunDependency) {
+        winfishAssetRunDependency = false;
+        removeRunDependency("winfish-assets");
+      } else {
+        location.reload();
+      }
+    }
+
+    function mapUserDataPath(name) {
+      var parts = normalizeZipName(name).split("/").filter(Boolean);
+      var idx = parts.findIndex(function(part) { return part.toLowerCase() === "userdata"; });
+      var rest = idx >= 0 ? parts.slice(idx + 1) : parts;
+      if (rest.length === 0) return "";
+      var last = rest[rest.length - 1].toLowerCase();
+      if (!last.endsWith(".json")) return "";
+      return WINFISH_USERDATA_ROOT + "/" + rest.join("/");
+    }
+
+    async function importUserData(file) {
+      statusText("Importing data...");
+      var entries = await readZip(file);
+      mkdirTree(WINFISH_USERDATA_ROOT);
+      removeTree(WINFISH_USERDATA_ROOT);
+      var count = 0;
+      entries.forEach(function(entry) {
+        var mapped = mapUserDataPath(entry.name);
+        if (!mapped) return;
+        mkdirTree(mapped.slice(0, mapped.lastIndexOf("/")));
+        FS.writeFile(mapped, entry.data);
+        count++;
+      });
+      if (count === 0)
+        throw new Error("The zip did not contain JSON userdata.");
+      await syncPersistentData(false);
+      statusText("Data imported. Reloading...");
+      location.reload();
+    }
+
+    function makeCrcTable() {
+      var table = new Uint32Array(256);
+      for (var n = 0; n < 256; ++n) {
+        var c = n;
+        for (var k = 0; k < 8; ++k)
+          c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        table[n] = c >>> 0;
+      }
+      return table;
+    }
+
+    var crcTable = makeCrcTable();
+    function crc32(bytes) {
+      var crc = 0xffffffff;
+      for (var i = 0; i < bytes.length; ++i)
+        crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+      return (crc ^ 0xffffffff) >>> 0;
+    }
+
+    function write16(out, value) {
+      out.push(value & 0xff, (value >>> 8) & 0xff);
+    }
+
+    function write32(out, value) {
+      out.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+    }
+
+    function buildZip(files) {
+      var encoder = new TextEncoder();
+      var chunks = [];
+      var central = [];
+      var offset = 0;
+      files.forEach(function(file) {
+        var nameBytes = encoder.encode(file.name);
+        var data = file.data;
+        var crc = crc32(data);
+        var local = [];
+        write32(local, 0x04034b50);
+        write16(local, 20);
+        write16(local, 0);
+        write16(local, 0);
+        write16(local, 0);
+        write16(local, 0);
+        write32(local, crc);
+        write32(local, data.length);
+        write32(local, data.length);
+        write16(local, nameBytes.length);
+        write16(local, 0);
+        chunks.push(new Uint8Array(local), nameBytes, data);
+
+        var cd = [];
+        write32(cd, 0x02014b50);
+        write16(cd, 20);
+        write16(cd, 20);
+        write16(cd, 0);
+        write16(cd, 0);
+        write16(cd, 0);
+        write16(cd, 0);
+        write32(cd, crc);
+        write32(cd, data.length);
+        write32(cd, data.length);
+        write16(cd, nameBytes.length);
+        write16(cd, 0);
+        write16(cd, 0);
+        write16(cd, 0);
+        write16(cd, 0);
+        write32(cd, 0);
+        write32(cd, offset);
+        central.push(new Uint8Array(cd), nameBytes);
+        offset += local.length + nameBytes.length + data.length;
+      });
+
+      var centralSize = central.reduce(function(total, chunk) { return total + chunk.length; }, 0);
+      var end = [];
+      write32(end, 0x06054b50);
+      write16(end, 0);
+      write16(end, 0);
+      write16(end, files.length);
+      write16(end, files.length);
+      write32(end, centralSize);
+      write32(end, offset);
+      write16(end, 0);
+      return new Blob(chunks.concat(central, [new Uint8Array(end)]), { type: "application/zip" });
+    }
+
+    async function exportUserData() {
+      statusText("Exporting data...");
+      await syncPersistentData(false);
+      var files = [];
+      listFiles(WINFISH_USERDATA_ROOT, files, "userdata");
+      files = files.filter(function(file) { return file.name.toLowerCase().endsWith(".json"); });
+      if (files.length === 0) {
+        statusText("No JSON userdata to export.");
+        return;
+      }
+      var blob = buildZip(files.map(function(file) {
+        return { name: file.name, data: FS.readFile(file.path) };
+      }));
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "winfish-userdata.zip";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() {
+        URL.revokeObjectURL(a.href);
+        a.remove();
+      }, 0);
+      statusText("");
+    }
+
+    function syncPersistentData(populate) {
+      return new Promise(function(resolve) {
+        if (typeof FS === "undefined" || !FS.syncfs) {
+          resolve();
+          return;
+        }
+        FS.syncfs(populate, function(err) {
+          if (err) console.warn("IDBFS sync error:", err);
+          resolve();
+        });
+      });
+    }
+
+    function wireFileInput(id, handler) {
+      document.getElementById(id).addEventListener("change", function(event) {
+        var file = event.target.files && event.target.files[0];
+        event.target.value = "";
+        if (!file) return;
+        handler(file).catch(function(err) {
+          console.error(err);
+          statusText(err.message || String(err));
+          if (winfishAssetRunDependency) showAssetPanel(true);
+        });
+      });
+    }
+
+    wireFileInput("asset-file", importAssets);
+    wireFileInput("asset-file-blocking", importAssets);
+    wireFileInput("userdata-file", importUserData);
+    document.getElementById("export-userdata").addEventListener("click", function() {
+      exportUserData().catch(function(err) {
+        console.error(err);
+        statusText(err.message || String(err));
+      });
+    });
+
+    var Module = {
+      canvas: document.getElementById("canvas"),
+      preRun: [function() {
+        addRunDependency("winfish-saves");
+        mkdirTree(WINFISH_SAVE_ROOT);
+        FS.mount(IDBFS, {}, WINFISH_SAVE_ROOT);
+
+        if (!WINFISH_WASM_EMBEDDED_ASSETS) {
+          WINFISH_REQUIRED_ASSET_DIRS.forEach(function(dir) {
+            var mountPoint = "/" + dir;
+            mkdirTree(mountPoint);
+            FS.mount(IDBFS, {}, mountPoint);
+          });
+          addRunDependency("winfish-assets");
+          winfishAssetRunDependency = true;
+        }
+
+        syncPersistentData(true).then(function() {
+          removeRunDependency("winfish-saves");
+          if (winfishAssetRunDependency) {
+            if (hasRequiredAssets()) {
+              winfishAssetRunDependency = false;
+              removeRunDependency("winfish-assets");
+            } else {
+              statusText("Upload Insaniquarium assets to start.");
+              showAssetPanel(true);
+            }
+          }
+        });
+      }],
+      setStatus: statusText,
+      print: function(text) { console.log(text); },
+      printErr: function(text) { console.error(text); }
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
