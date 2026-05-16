@@ -13,6 +13,10 @@
       color: #e7eef8;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
     #canvas-container {
       width: 100vw;
@@ -20,12 +24,36 @@
       display: grid;
       place-items: center;
       background: #0564bd;
+      touch-action: none;
     }
     canvas {
       width: min(100vw, calc(100vh * 4 / 3));
       height: min(100vh, calc(100vw * 3 / 4));
       image-rendering: auto;
       outline: none;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #winfish-soft-keyboard {
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      width: 1px;
+      height: 1px;
+      margin: 0;
+      border: 0;
+      padding: 0;
+      opacity: 0;
+      color: transparent;
+      background: transparent;
+      caret-color: transparent;
+      font-size: 16px;
+      pointer-events: none;
+      z-index: 1;
+      -webkit-user-select: text;
+      user-select: text;
     }
     #status {
       position: fixed;
@@ -57,6 +85,18 @@
     }
     .tool-button:hover, .file-label:hover {
       background: rgba(24, 35, 48, 0.82);
+    }
+    #soft-keyboard-button {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      display: none;
+      z-index: 6;
+    }
+    @media (hover: none) and (pointer: coarse) {
+      #soft-keyboard-button.active {
+        display: block;
+      }
     }
     .file-label input {
       display: none;
@@ -103,6 +143,7 @@
   <div id="canvas-container">
     <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
   </div>
+  <input id="winfish-soft-keyboard" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done" aria-hidden="true">
 
   <div id="wasm-tools">
     <label class="file-label" id="asset-upload-tool" hidden>
@@ -115,6 +156,7 @@
     </label>
     <button class="tool-button" id="export-userdata" type="button">Export Data</button>
   </div>
+  <button class="tool-button" id="soft-keyboard-button" type="button" aria-label="Show keyboard">ABC</button>
 
   <div id="asset-panel">
     <div id="asset-panel-inner">
