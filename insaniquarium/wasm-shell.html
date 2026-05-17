@@ -43,6 +43,8 @@
       left: 0;
       top: 0;
       overflow: hidden;
+      clip-path: inset(0);
+      contain: strict;
       pointer-events: none;
       z-index: 4;
       display: none;
@@ -310,16 +312,41 @@
         var handleMove = function(event) {
           updateWasmCursorPosition(event.clientX, event.clientY);
         };
+        var handleTrackedMove = function(event) {
+          if (event.pointerType && event.pointerType !== "mouse" && event.pointerType !== "pen") {
+            hideWasmCursor(true);
+            return;
+          }
+          updateWasmCursorPosition(event.clientX, event.clientY);
+        };
+        var handleWindowExit = function(event) {
+          if (!event.relatedTarget && !event.toElement)
+            hideWasmCursor(true);
+        };
         canvas.addEventListener("pointerenter", handleMove);
         canvas.addEventListener("pointermove", handleMove);
         canvas.addEventListener("mousemove", handleMove);
-        canvas.addEventListener("pointerleave", hideWasmCursor);
-        canvas.addEventListener("mouseleave", hideWasmCursor);
+        canvas.addEventListener("pointerleave", function() { hideWasmCursor(true); });
+        canvas.addEventListener("pointercancel", function() { hideWasmCursor(true); });
+        canvas.addEventListener("lostpointercapture", function() { hideWasmCursor(true); });
+        canvas.addEventListener("mouseleave", function() { hideWasmCursor(true); });
+        window.addEventListener("pointermove", handleTrackedMove, true);
+        document.addEventListener("pointermove", handleTrackedMove, true);
+        window.addEventListener("mousemove", handleTrackedMove, true);
+        document.addEventListener("mousemove", handleTrackedMove, true);
+        window.addEventListener("pointerout", handleWindowExit, true);
+        document.addEventListener("pointerout", handleWindowExit, true);
+        window.addEventListener("mouseout", handleWindowExit, true);
+        document.addEventListener("mouseout", handleWindowExit, true);
         ["fullscreenchange", "webkitfullscreenchange"].forEach(function(type) {
           document.addEventListener(type, refreshWasmCursorAfterLayout);
         });
         window.addEventListener("resize", refreshWasmCursorAfterLayout);
-        window.addEventListener("blur", hideWasmCursor);
+        window.addEventListener("blur", function() { hideWasmCursor(true); });
+        window.addEventListener("pagehide", function() { hideWasmCursor(true); });
+        document.addEventListener("visibilitychange", function() {
+          if (document.hidden) hideWasmCursor(true);
+        });
       }
 
       return winfishCursorState;
@@ -354,11 +381,15 @@
         updateWasmCursorPosition(state.lastClientX, state.lastClientY);
     }
 
-    function hideWasmCursor() {
+    function hideWasmCursor(clearPoint) {
       var state = ensureWasmCursor();
       if (!state) return;
       state.overCanvas = false;
       state.clip.style.display = "none";
+      if (clearPoint) {
+        state.lastClientX = null;
+        state.lastClientY = null;
+      }
     }
 
     function updateWasmCursorPosition(clientX, clientY) {
@@ -369,6 +400,7 @@
       state.lastClientY = clientY;
 
       if (!state.customActive || !state.visible) {
+        state.overCanvas = false;
         state.clip.style.display = "none";
         return;
       }
@@ -376,7 +408,7 @@
       var canvasRect = state.canvas.getBoundingClientRect();
       if (clientX < canvasRect.left || clientX >= canvasRect.right ||
           clientY < canvasRect.top || clientY >= canvasRect.bottom) {
-        hideWasmCursor();
+        hideWasmCursor(false);
         return;
       }
 
