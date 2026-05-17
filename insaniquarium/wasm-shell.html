@@ -195,7 +195,7 @@
   <input id="winfish-soft-keyboard" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done" aria-hidden="true">
 
   <div id="wasm-tools">
-    <button class="tool-button" id="soft-keyboard-button" type="button" aria-label="Show keyboard">ABC</button>
+    <button class="tool-button" id="soft-keyboard-button" type="button" aria-label="Show keyboard" hidden>ABC</button>
     <label class="file-label" id="asset-upload-tool" hidden>
       Assets
       <input id="asset-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
@@ -278,6 +278,10 @@
       document.getElementById("asset-panel").style.display = show ? "flex" : "none";
       document.getElementById("asset-panel-inner").classList.remove("drag-active");
       setAssetlessLegalVisible(show && !WINFISH_WASM_EMBEDDED_ASSETS);
+      if (show && !WINFISH_WASM_EMBEDDED_ASSETS) {
+        setUserDataToolsVisible(false);
+        setKeyboardToolVisible(false);
+      }
     }
 
     function setAssetlessLegalVisible(visible) {
@@ -292,12 +296,25 @@
       });
     }
 
+    function setKeyboardToolVisible(visible) {
+      var element = document.getElementById("soft-keyboard-button");
+      if (element) element.hidden = !visible;
+    }
+
     function updateUserDataToolsVisibility() {
       if (WINFISH_WASM_EMBEDDED_ASSETS) {
         setUserDataToolsVisible(true);
         return;
       }
       setUserDataToolsVisible(typeof FS !== "undefined" && hasRequiredAssets());
+    }
+
+    function updateKeyboardToolVisibility() {
+      if (WINFISH_WASM_EMBEDDED_ASSETS) {
+        setKeyboardToolVisible(true);
+        return;
+      }
+      setKeyboardToolVisible(typeof FS !== "undefined" && hasRequiredAssets());
     }
 
     function fullscreenElement() {
@@ -462,6 +479,7 @@
         throw new Error("The zip did not contain all required asset folders.");
       await syncPersistentData(false);
       setUserDataToolsVisible(true);
+      setKeyboardToolVisible(true);
       showAssetPanel(false);
       statusText("");
       if (winfishAssetRunDependency) {
@@ -487,6 +505,7 @@
       });
       await syncPersistentData(false);
       setUserDataToolsVisible(false);
+      setKeyboardToolVisible(false);
       statusText("Assets deleted. Reloading...");
       setTimeout(function() { location.reload(); }, 0);
     }
@@ -712,19 +731,23 @@
           removeRunDependency("winfish-saves");
           if (WINFISH_WASM_EMBEDDED_ASSETS) {
             setUserDataToolsVisible(true);
+            setKeyboardToolVisible(true);
           }
           if (winfishAssetRunDependency) {
             if (hasRequiredAssets()) {
               setUserDataToolsVisible(true);
+              setKeyboardToolVisible(true);
               winfishAssetRunDependency = false;
               removeRunDependency("winfish-assets");
             } else {
               setUserDataToolsVisible(false);
+              setKeyboardToolVisible(false);
               statusText("Upload Insaniquarium assets to start.");
               showAssetPanel(true);
             }
           } else {
             updateUserDataToolsVisibility();
+            updateKeyboardToolVisibility();
           }
         });
       }],
