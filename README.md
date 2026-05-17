@@ -2,9 +2,9 @@ Insaniquarium Web Browser Port (WASM)
 
 A web-based port of **Insaniquarium Deluxe** that runs directly in your browser.
 
-![Virtual Tank](insaniquarium/assets/img0.png)
-![Hall of Fame](insaniquarium/assets/img1.png)
-![Main Menu](insaniquarium/assets/img2.png)
+![Virtual Tank](assets/img0.png)
+![Hall of Fame](assets/img1.png)
+![Main Menu](assets/img2.png)
 
 ## Features
 - Play **Insaniquarium** in your browser (no download needed)
