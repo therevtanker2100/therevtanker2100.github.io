@@ -19,11 +19,13 @@
       user-select: none;
     }
     #canvas-container {
+      position: relative;
       width: 100vw;
       height: 100vh;
       display: grid;
       place-items: center;
       background: #0564bd;
+      overflow: hidden;
       touch-action: none;
     }
     canvas {
@@ -35,6 +37,21 @@
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
+    }
+    #winfish-cursor-clip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 4;
+      display: none;
+    }
+    #winfish-cursor {
+      position: absolute;
+      left: 0;
+      top: 0;
+      pointer-events: none;
     }
     #winfish-soft-keyboard {
       position: fixed;
@@ -230,6 +247,189 @@
     var winfishAssetRunDependency = false;
     var winfishLandscapeLockInFlight = false;
     var winfishAudioResumeScheduled = false;
+    var winfishCursorState = null;
+
+    function cursorCssForNum(cursorNum) {
+      switch (cursorNum) {
+        case 1: return "pointer";
+        case 3: return "text";
+        case 4: return "not-allowed";
+        case 5: return "move";
+        case 6: return "nesw-resize";
+        case 7: return "ns-resize";
+        case 8: return "nwse-resize";
+        case 9: return "ew-resize";
+        case 10: return "wait";
+        case 11: return "none";
+        default: return "default";
+      }
+    }
+
+    function ensureWasmCursor() {
+      var container = document.getElementById("canvas-container");
+      var canvas = document.getElementById("canvas");
+      if (!container || !canvas) return null;
+
+      var clip = document.getElementById("winfish-cursor-clip");
+      if (!clip) {
+        clip = document.createElement("div");
+        clip.id = "winfish-cursor-clip";
+        container.appendChild(clip);
+      }
+
+      var cursor = document.getElementById("winfish-cursor");
+      if (!cursor) {
+        cursor = document.createElement("canvas");
+        cursor.id = "winfish-cursor";
+        clip.appendChild(cursor);
+      }
+
+      if (!winfishCursorState) {
+        winfishCursorState = {
+          clip: clip,
+          cursor: cursor,
+          canvas: canvas,
+          container: container,
+          customActive: false,
+          visible: true,
+          overCanvas: false,
+          hotspotX: 0,
+          hotspotY: 0,
+          lastClientX: null,
+          lastClientY: null
+        };
+      } else {
+        winfishCursorState.clip = clip;
+        winfishCursorState.cursor = cursor;
+        winfishCursorState.canvas = canvas;
+        winfishCursorState.container = container;
+      }
+
+      if (!canvas.winfishCursorWired) {
+        canvas.winfishCursorWired = true;
+        var handleMove = function(event) {
+          updateWasmCursorPosition(event.clientX, event.clientY);
+        };
+        canvas.addEventListener("pointerenter", handleMove);
+        canvas.addEventListener("pointermove", handleMove);
+        canvas.addEventListener("mousemove", handleMove);
+        canvas.addEventListener("pointerleave", hideWasmCursor);
+        canvas.addEventListener("mouseleave", hideWasmCursor);
+        ["fullscreenchange", "webkitfullscreenchange"].forEach(function(type) {
+          document.addEventListener(type, refreshWasmCursorAfterLayout);
+        });
+        window.addEventListener("resize", refreshWasmCursorAfterLayout);
+        window.addEventListener("blur", hideWasmCursor);
+      }
+
+      return winfishCursorState;
+    }
+
+    function setCanvasCursorStyle(cursorValue) {
+      var state = ensureWasmCursor();
+      if (!state) return;
+      state.canvas.style.cursor = cursorValue;
+    }
+
+    function refreshWasmCursorClip() {
+      var state = ensureWasmCursor();
+      if (!state) return;
+
+      var canvasRect = state.canvas.getBoundingClientRect();
+      var containerRect = state.container.getBoundingClientRect();
+      state.clip.style.left = Math.round(canvasRect.left - containerRect.left) + "px";
+      state.clip.style.top = Math.round(canvasRect.top - containerRect.top) + "px";
+      state.clip.style.width = Math.round(canvasRect.width) + "px";
+      state.clip.style.height = Math.round(canvasRect.height) + "px";
+
+      if (state.customActive && state.visible && state.overCanvas)
+        state.clip.style.display = "block";
+    }
+
+    function refreshWasmCursorAfterLayout() {
+      var state = ensureWasmCursor();
+      if (!state) return;
+      refreshWasmCursorClip();
+      if (state.lastClientX !== null && state.lastClientY !== null)
+        updateWasmCursorPosition(state.lastClientX, state.lastClientY);
+    }
+
+    function hideWasmCursor() {
+      var state = ensureWasmCursor();
+      if (!state) return;
+      state.overCanvas = false;
+      state.clip.style.display = "none";
+    }
+
+    function updateWasmCursorPosition(clientX, clientY) {
+      var state = ensureWasmCursor();
+      if (!state) return;
+
+      state.lastClientX = clientX;
+      state.lastClientY = clientY;
+
+      if (!state.customActive || !state.visible) {
+        state.clip.style.display = "none";
+        return;
+      }
+
+      var canvasRect = state.canvas.getBoundingClientRect();
+      if (clientX < canvasRect.left || clientX >= canvasRect.right ||
+          clientY < canvasRect.top || clientY >= canvasRect.bottom) {
+        hideWasmCursor();
+        return;
+      }
+
+      state.overCanvas = true;
+      refreshWasmCursorClip();
+
+      var x = Math.round(clientX - canvasRect.left - state.hotspotX);
+      var y = Math.round(clientY - canvasRect.top - state.hotspotY);
+      state.cursor.style.transform = "translate(" + x + "px, " + y + "px)";
+      state.clip.style.display = "block";
+    }
+
+    function setWasmSystemCursor(cursorNum, visible) {
+      var state = ensureWasmCursor();
+      if (!state) return;
+      state.customActive = false;
+      state.visible = !!visible;
+      state.clip.style.display = "none";
+      setCanvasCursorStyle(visible ? cursorCssForNum(cursorNum) : "none");
+    }
+
+    function setWasmCustomCursor(cursorNum, pixels, width, height, hotspotX, hotspotY) {
+      var state = ensureWasmCursor();
+      if (!state || !pixels || width <= 0 || height <= 0 || typeof HEAPU8 === "undefined") {
+        setWasmSystemCursor(cursorNum, true);
+        return;
+      }
+
+      state.customActive = true;
+      state.visible = true;
+      state.hotspotX = Math.max(0, Math.min(width - 1, hotspotX | 0));
+      state.hotspotY = Math.max(0, Math.min(height - 1, hotspotY | 0));
+      setCanvasCursorStyle("none");
+
+      if (state.cursor.width !== width) state.cursor.width = width;
+      if (state.cursor.height !== height) state.cursor.height = height;
+      state.cursor.style.width = width + "px";
+      state.cursor.style.height = height + "px";
+
+      var src = HEAPU8.subarray(pixels >>> 0, (pixels >>> 0) + width * height * 4);
+      var ctx = state.cursor.getContext("2d");
+      var imageData = ctx.createImageData(width, height);
+      var dst = imageData.data;
+      for (var srcIdx = 0, dstIdx = 0; srcIdx < src.length; srcIdx += 4, dstIdx += 4) {
+        dst[dstIdx] = src[srcIdx + 2];
+        dst[dstIdx + 1] = src[srcIdx + 1];
+        dst[dstIdx + 2] = src[srcIdx];
+        dst[dstIdx + 3] = src[srcIdx + 3];
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      refreshWasmCursorClip();
+    }
 
     function requestLandscapeOrientation() {
       if (typeof screen === "undefined" || !screen.orientation || typeof screen.orientation.lock !== "function") {
@@ -505,6 +705,10 @@
       return view.getUint32(offset, true);
     }
 
+    function little16(view, offset) {
+      return view.getUint16(offset, true);
+    }
+
     async function inflateRaw(bytes) {
       if (typeof DecompressionStream === "undefined")
         throw new Error("This browser cannot inflate zip files.");
@@ -512,26 +716,36 @@
       return new Uint8Array(await new Response(stream).arrayBuffer());
     }
 
-    async function readZip(file) {
-      var bytes = new Uint8Array(await file.arrayBuffer());
-      var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    function decodeZipName(bytes, flags) {
+      return new TextDecoder("utf-8").decode(bytes);
+    }
+
+    function findZipEndOfCentralDirectory(view, bytesLength) {
+      var minOffset = Math.max(0, bytesLength - 22 - 65535);
+      for (var offset = bytesLength - 22; offset >= minOffset; --offset) {
+        if (little32(view, offset) === 0x06054b50) return offset;
+      }
+      return -1;
+    }
+
+    async function readZipEntriesFromLocalHeaders(bytes, view) {
       var entries = [];
       var offset = 0;
       while (offset + 30 <= bytes.length) {
         var sig = little32(view, offset);
         if (sig !== 0x04034b50) break;
-        var flags = view.getUint16(offset + 6, true);
-        var method = view.getUint16(offset + 8, true);
+        var flags = little16(view, offset + 6);
+        var method = little16(view, offset + 8);
         var compressedSize = little32(view, offset + 18);
-        var nameLen = view.getUint16(offset + 26, true);
-        var extraLen = view.getUint16(offset + 28, true);
+        var nameLen = little16(view, offset + 26);
+        var extraLen = little16(view, offset + 28);
         var nameStart = offset + 30;
         var dataStart = nameStart + nameLen + extraLen;
         if (flags & 0x08)
           throw new Error("Zip data descriptors are not supported.");
         if (dataStart + compressedSize > bytes.length)
           throw new Error("Zip entry is truncated.");
-        var rawName = new TextDecoder().decode(bytes.slice(nameStart, nameStart + nameLen));
+        var rawName = decodeZipName(bytes.slice(nameStart, nameStart + nameLen), flags);
         var name = normalizeZipName(rawName);
         var compressed = bytes.slice(dataStart, dataStart + compressedSize);
         var data;
@@ -542,6 +756,55 @@
         offset = dataStart + compressedSize;
       }
       return entries;
+    }
+
+    async function readZipEntriesFromCentralDirectory(bytes, view, eocdOffset) {
+      var entryCount = little16(view, eocdOffset + 10);
+      var centralOffset = little32(view, eocdOffset + 16);
+      var offset = centralOffset;
+      var entries = [];
+      for (var i = 0; i < entryCount; ++i) {
+        if (offset + 46 > bytes.length || little32(view, offset) !== 0x02014b50)
+          throw new Error("Zip central directory is truncated.");
+        var flags = little16(view, offset + 8);
+        var method = little16(view, offset + 10);
+        var compressedSize = little32(view, offset + 20);
+        var nameLen = little16(view, offset + 28);
+        var extraLen = little16(view, offset + 30);
+        var commentLen = little16(view, offset + 32);
+        var localHeaderOffset = little32(view, offset + 42);
+        if (compressedSize === 0xffffffff || localHeaderOffset === 0xffffffff)
+          throw new Error("Zip64 userdata archives are not supported.");
+        var nameStart = offset + 46;
+        var rawName = decodeZipName(bytes.slice(nameStart, nameStart + nameLen), flags);
+        var name = normalizeZipName(rawName);
+        offset = nameStart + nameLen + extraLen + commentLen;
+        if (!name || name.endsWith("/")) continue;
+        if (flags & 0x01)
+          throw new Error("Encrypted zip entries are not supported.");
+        if (localHeaderOffset + 30 > bytes.length || little32(view, localHeaderOffset) !== 0x04034b50)
+          throw new Error("Zip local header is missing for " + name + ".");
+        var localNameLen = little16(view, localHeaderOffset + 26);
+        var localExtraLen = little16(view, localHeaderOffset + 28);
+        var dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+        if (dataStart + compressedSize > bytes.length)
+          throw new Error("Zip entry is truncated.");
+        var compressed = bytes.slice(dataStart, dataStart + compressedSize);
+        var data;
+        if (method === 0) data = compressed;
+        else if (method === 8) data = await inflateRaw(compressed);
+        else throw new Error("Unsupported zip compression method " + method + " for " + name);
+        entries.push({ name: name, data: data });
+      }
+      return entries;
+    }
+
+    async function readZip(file) {
+      var bytes = new Uint8Array(await file.arrayBuffer());
+      var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      var eocdOffset = findZipEndOfCentralDirectory(view, bytes.length);
+      if (eocdOffset >= 0) return readZipEntriesFromCentralDirectory(bytes, view, eocdOffset);
+      return readZipEntriesFromLocalHeaders(bytes, view);
     }
 
     function mapAssetPath(name) {
@@ -611,11 +874,15 @@
 
     function mapUserDataPath(name) {
       var parts = normalizeZipName(name).split("/").filter(Boolean);
+      if (parts.some(function(part) { return part === "__MACOSX"; })) return "";
       var idx = parts.findIndex(function(part) { return part.toLowerCase() === "userdata"; });
       var rest = idx >= 0 ? parts.slice(idx + 1) : parts;
       if (rest.length === 0) return "";
       var last = rest[rest.length - 1].toLowerCase();
+      if (last === ".ds_store" || last.indexOf("._") === 0) return "";
       if (!last.endsWith(".json")) return "";
+      if (idx < 0 && rest.length > 1)
+        rest = [rest[rest.length - 1]];
       return WINFISH_USERDATA_ROOT + "/" + rest.join("/");
     }
 
@@ -813,6 +1080,8 @@
       wasmRequestLandscapeOrientation: requestLandscapeOrientation,
       wasmSetGameFullscreen: setGameFullscreen,
       wasmResumeAudioContext: resumeBrowserAudio,
+      wasmSetSystemCursor: setWasmSystemCursor,
+      wasmSetCustomCursor: setWasmCustomCursor,
       preRun: [function() {
         addRunDependency("winfish-saves");
         mkdirTree(WINFISH_SAVE_ROOT);
