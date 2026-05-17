@@ -229,6 +229,7 @@
     var WINFISH_USERDATA_ROOT = WINFISH_SAVE_ROOT + "/userdata";
     var winfishAssetRunDependency = false;
     var winfishLandscapeLockInFlight = false;
+    var winfishAudioResumeScheduled = false;
 
     function requestLandscapeOrientation() {
       if (typeof screen === "undefined" || !screen.orientation || typeof screen.orientation.lock !== "function") {
@@ -265,6 +266,78 @@
       });
       window.addEventListener("resize", function() {
         requestLandscapeOrientation();
+      });
+    }
+
+    function getSDLRuntime() {
+      if (typeof SDL !== "undefined") return SDL;
+      if (typeof Module !== "undefined" && Module.SDL) return Module.SDL;
+      return null;
+    }
+
+    function pumpSDLAudio(sdl) {
+      if (!sdl || !sdl.audio || sdl.audio.paused) return;
+      try {
+        if (typeof sdl.audio.queueNewAudioData === "function") {
+          sdl.audio.queueNewAudioData();
+        }
+        if (!sdl.audio.timer && typeof sdl.audio.caller === "function") {
+          sdl.audio.numAudioTimersPending = Math.max(sdl.audio.numAudioTimersPending || 0, 1);
+          sdl.audio.timer = setTimeout(sdl.audio.caller, 1);
+        }
+      } catch (err) {
+        console.warn("SDL audio pump failed:", err);
+      }
+    }
+
+    function resumeAudioContext(ctx, afterResume) {
+      if (!ctx || typeof ctx.resume !== "function") return false;
+      if (ctx.state !== "suspended" && ctx.state !== "interrupted") return false;
+
+      try {
+        var promise = ctx.resume();
+        if (promise && typeof promise.then === "function") {
+          promise.then(afterResume).catch(function(err) {
+            console.warn("Audio resume failed:", err);
+          });
+        }
+        return true;
+      } catch (err) {
+        console.warn("Audio resume failed:", err);
+        return false;
+      }
+    }
+
+    function resumeBrowserAudio() {
+      var sdl = getSDLRuntime();
+      if (!sdl) return;
+
+      var resumed = resumeAudioContext(sdl.audioContext, function() {
+        pumpSDLAudio(sdl);
+      });
+
+      if (!resumed) {
+        pumpSDLAudio(sdl);
+      }
+    }
+
+    function scheduleBrowserAudioResume() {
+      if (winfishAudioResumeScheduled) return;
+      winfishAudioResumeScheduled = true;
+      setTimeout(function() {
+        winfishAudioResumeScheduled = false;
+        resumeBrowserAudio();
+      }, 0);
+    }
+
+    function wireBrowserAudioResume() {
+      ["focus", "pageshow", "visibilitychange", "fullscreenchange", "webkitfullscreenchange"].forEach(function(type) {
+        window.addEventListener(type, scheduleBrowserAudioResume);
+        document.addEventListener(type, scheduleBrowserAudioResume);
+      });
+      ["pointerdown", "mousedown", "touchstart", "keydown"].forEach(function(type) {
+        window.addEventListener(type, resumeBrowserAudio, { passive: true });
+        document.addEventListener(type, resumeBrowserAudio, { passive: true });
       });
     }
 
@@ -345,9 +418,18 @@
     }
 
     function setGameFullscreen(fullscreen) {
-      if (fullscreenElement() && fullscreen) return Promise.resolve(true);
-      if (!fullscreenElement() && !fullscreen) return Promise.resolve(true);
-      return fullscreen ? requestGameFullscreen() : exitGameFullscreen();
+      var promise;
+      if (fullscreenElement() && fullscreen) promise = Promise.resolve(true);
+      else if (!fullscreenElement() && !fullscreen) promise = Promise.resolve(true);
+      else promise = fullscreen ? requestGameFullscreen() : exitGameFullscreen();
+
+      return Promise.resolve(promise).then(function(result) {
+        scheduleBrowserAudioResume();
+        return result;
+      }, function(err) {
+        scheduleBrowserAudioResume();
+        throw err;
+      });
     }
 
     function mkdirTree(path) {
@@ -701,6 +783,7 @@
     wireFileInput("userdata-file", importUserData);
     wireAssetDropZone();
     wireLandscapeOrientationLock();
+    wireBrowserAudioResume();
     document.getElementById("export-userdata").addEventListener("click", function() {
       exportUserData().catch(function(err) {
         console.error(err);
@@ -712,6 +795,7 @@
       canvas: document.getElementById("canvas"),
       wasmRequestLandscapeOrientation: requestLandscapeOrientation,
       wasmSetGameFullscreen: setGameFullscreen,
+      wasmResumeAudioContext: resumeBrowserAudio,
       preRun: [function() {
         addRunDependency("winfish-saves");
         mkdirTree(WINFISH_SAVE_ROOT);
