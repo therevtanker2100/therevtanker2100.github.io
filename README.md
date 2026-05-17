@@ -1,4 +1,4 @@
-Insaniquarium Web Browser Port (WASM)
+# Insaniquarium Web Browser Port (WASM)
 
 A web-based port of **Insaniquarium Deluxe** that runs directly in your browser.
 
