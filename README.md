@@ -8,13 +8,13 @@ A web-based port of **Insaniquarium Deluxe** that runs directly in your browser.
 
 ## Features
 - Play **Insaniquarium** in your browser (no download needed)
-- Integrated **PvZ Portable** (Plants vs. Zombies) support
+- Integrated **PvZ Portable** (Plants vs. Zombies) framework
 - Drag & drop your game assets to play
 
 ## Credits & Thanks
 
 - **Base port / idea**: Inspired by WinFish (Insaniquarium screensaver/port)
-- **PvZ Integration**: [PvZ-Portable](https://github.com/wszqkzqk/PvZ-Portable) by wszqkzqk
+- **PvZ semi-Integration**: [PvZ-Portable](https://github.com/wszqkzqk/PvZ-Portable) by wszqkzqk
 - **Major development assistance**: Codex (AI)
 - Original framework license by **PopCap Games**
 
