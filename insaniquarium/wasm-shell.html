@@ -390,32 +390,49 @@
       setKeyboardToolVisible(typeof FS !== "undefined" && hasRequiredAssets());
     }
 
-    function fullscreenElement() {
-      return document.fullscreenElement || document.webkitFullscreenElement || null;
-    }
+	    function fullscreenElement() {
+	      return document.fullscreenElement || document.webkitFullscreenElement || null;
+	    }
 
-    function requestGameFullscreen() {
-      var target = document.getElementById("canvas-container") || document.documentElement;
-      requestLandscapeOrientation();
-      if (target.requestFullscreen) {
-        return target.requestFullscreen().then(function() {
-          requestLandscapeOrientation();
-          return true;
-        });
-      }
-      if (target.webkitRequestFullscreen) {
-        var result = target.webkitRequestFullscreen();
-        requestLandscapeOrientation();
-        return Promise.resolve(result).then(function() { return true; });
-      }
-      return Promise.resolve(false);
-    }
+	    function fullscreenRequestSupported(target) {
+	      if (!target) return false;
+	      if (document.fullscreenEnabled === false && !target.webkitRequestFullscreen) return false;
+	      return !!(target.requestFullscreen || target.webkitRequestFullscreen);
+	    }
 
-    function exitGameFullscreen() {
-      if (document.exitFullscreen) return document.exitFullscreen();
-      if (document.webkitExitFullscreen) return Promise.resolve(document.webkitExitFullscreen());
-      return Promise.resolve();
-    }
+	    function fullscreenExitSupported() {
+	      return !!(document.exitFullscreen || document.webkitExitFullscreen);
+	    }
+
+	    function requestGameFullscreen() {
+	      var target = document.getElementById("canvas-container") || document.documentElement;
+	      if (fullscreenElement()) return Promise.resolve(true);
+	      if (!fullscreenRequestSupported(target)) {
+	        statusText("Fullscreen is not supported in this browser context.");
+	        return Promise.resolve(false);
+	      }
+	      requestLandscapeOrientation();
+	      if (target.requestFullscreen) {
+	        return target.requestFullscreen().then(function() {
+	          requestLandscapeOrientation();
+	          return true;
+	        });
+	      }
+	      if (target.webkitRequestFullscreen) {
+	        var result = target.webkitRequestFullscreen();
+	        requestLandscapeOrientation();
+	        return Promise.resolve(result).then(function() { return true; });
+	      }
+	      return Promise.resolve(false);
+	    }
+
+	    function exitGameFullscreen() {
+	      if (!fullscreenElement()) return Promise.resolve(true);
+	      if (document.exitFullscreen) return document.exitFullscreen();
+	      if (document.webkitExitFullscreen) return Promise.resolve(document.webkitExitFullscreen());
+	      if (!fullscreenExitSupported()) return Promise.resolve(false);
+	      return Promise.resolve(false);
+	    }
 
     function setGameFullscreen(fullscreen) {
       var promise;
