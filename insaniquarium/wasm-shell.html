@@ -85,7 +85,7 @@
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
     }
     #wasm-tools {
-      position: fixed;
+      position: absolute;
       top: calc(12px + env(safe-area-inset-top, 0px));
       right: calc(12px + env(safe-area-inset-right, 0px));
       display: flex;
@@ -210,21 +210,20 @@
 <body>
   <div id="canvas-container">
     <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+    <div id="wasm-tools">
+      <button class="tool-button" id="soft-keyboard-button" type="button" aria-label="Show keyboard" hidden>ABC</button>
+      <label class="file-label" id="asset-upload-tool" hidden>
+        Assets
+        <input id="asset-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
+      </label>
+      <label class="file-label" id="userdata-import-tool" hidden>
+        Import Data
+        <input id="userdata-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
+      </label>
+      <button class="tool-button" id="export-userdata" type="button" hidden>Export Data</button>
+    </div>
   </div>
   <input id="winfish-soft-keyboard" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="done" aria-hidden="true">
-
-  <div id="wasm-tools">
-    <button class="tool-button" id="soft-keyboard-button" type="button" aria-label="Show keyboard" hidden>ABC</button>
-    <label class="file-label" id="asset-upload-tool" hidden>
-      Assets
-      <input id="asset-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
-    </label>
-    <label class="file-label" id="userdata-import-tool" hidden>
-      Import Data
-      <input id="userdata-file" type="file" accept=".zip,application/zip,application/x-zip-compressed">
-    </label>
-    <button class="tool-button" id="export-userdata" type="button" hidden>Export Data</button>
-  </div>
 
   <div id="asset-panel">
     <div id="asset-panel-inner">
